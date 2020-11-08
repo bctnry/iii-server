@@ -55,6 +55,14 @@ const server = tls.createServer(options, (socket) => {
             }
             
             try {
+                for (let i = 0; i < config.block.length; i++) {
+                    if (reqUrl.pathname.startsWith(config.block[i])) {
+                        // pretend that it isn't here...
+                        socket.write('51 Not found\r\n');
+                        socket.end();
+                        return;
+                    }
+                }
                 let localContentPath = path.join(config.content, reqUrl.pathname);
                 let stat = fs.statSync(localContentPath);
                 if (stat.isDirectory()) {
