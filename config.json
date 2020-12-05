@@ -5,5 +5,10 @@
     "host": "127.0.0.1",
     "block": [
         "/.git"
-    ]
+    ],
+    "proxy": {
+        "enabled": true,
+        "port": 1966,
+        "css": "style.css"
+    }
 }
