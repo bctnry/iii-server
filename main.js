@@ -128,7 +128,8 @@ if (config.proxy.enabled) {
     }
     const proxy = http.createServer((req, res) => {
         log(`proxy: ${req.url}`);
-        let localContentPath = path.join(config.content, req.url);
+        let reqUrl = (!req.url || !req.url.substring(1))? '/index.gmi' : req.url;
+        let localContentPath = path.join(config.content, reqUrl);
         try {
             let stat = fs.statSync(localContentPath);
             if (stat.isFile()) {
