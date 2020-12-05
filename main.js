@@ -118,14 +118,6 @@ server.listen(1965, () => {
 if (config.proxy.enabled) {
     const http = require('http');
     const gemtext = require('./gemtext');
-    let proxyCSS = '';
-    try {
-        if (config.proxy.css && typeof config.proxy.css === 'string' && config.proxy.css.trim()) {
-            proxyCSS = fs.readFileSync(config.proxy.css);
-        }
-    } catch (e) {
-        // intentionally left blank.
-    }
     const proxy = http.createServer((req, res) => {
         log(`proxy: ${req.url}`);
         let reqUrl = (!req.url || !req.url.substring(1))? '/index.gmi' : req.url;
@@ -138,6 +130,14 @@ if (config.proxy.enabled) {
                 try {
                     let data = fs.readFileSync(localContentPath);
                     if (mime === 'text/gemini') {
+                        let proxyCSS = '';
+                        try {
+                            if (config.proxy.css && typeof config.proxy.css === 'string' && config.proxy.css.trim()) {
+                                proxyCSS = fs.readFileSync(config.proxy.css);
+                            }
+                        } catch (e) {
+                            // intentionally left blank.
+                        }
                         let processedData = gemtext.parse(data.toString()).generate(gemtext.HTMLGenerator);
                         let cssString = proxyCSS? `<style>${proxyCSS}</style>` : '';
                         data = `<html><head><meta charset="utf-8" />${cssString}</head><body>${processedData}</body></html>`;
