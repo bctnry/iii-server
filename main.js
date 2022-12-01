@@ -8,6 +8,7 @@ const config = JSON.parse(fs.readFileSync('config.json'));
 const options = {
     key: fs.readFileSync(config.serverKey, 'utf-8'),
     cert: fs.readFileSync(config.serverCert, 'utf-8'),
+    passphrase: config.serverKeyPassword,
   
     rejectUnauthorized: false,
 };
@@ -28,15 +29,37 @@ const determineMIME = (x) => {
         '.htm': 'text/html',
         '.html': 'text/html',
         '.txt': 'text/plain',
+        '.png': 'image/png',
+        '.jpeg': 'image/jpeg',
+        '.jpg': 'image/ipeg',
+        '.svg': 'image/svg+xml',
+        '.bmp': 'image/bmp',
+        '.gif': 'image/gif',
     }[extn];
 }
 const isServableMIME = (x) => {
     return [
         'text/gemini',
         'text/html',
-        'text/plain'
+        'text/plain',
+        'image/png',
+        'image/jpeg',
+        'image/ipeg',
+        'image/svg+xml',
+        'image/bmp',
+        'image/gif',
     ].includes(x);
 }
+
+let proxyCSS = '';
+try {
+    if (config.proxy.css && typeof config.proxy.css === 'string' && config.proxy.css.trim()) {
+        proxyCSS = fs.readFileSync(config.proxy.css);
+    }
+} catch (e) {
+    // intentionally left blank.
+}
+let cssString = proxyCSS? `<style>${proxyCSS}</style>` : '';
 
 const server = tls.createServer(options, (socket) => {
     log(`${socket.remoteAddress} connected ${socket.authorized ? 'authorized' : 'unauthorized'}`);
@@ -69,8 +92,18 @@ const server = tls.createServer(options, (socket) => {
                 let localContentPath = path.join(config.content, reqUrl.pathname);
                 let stat = fs.statSync(localContentPath);
                 if (stat.isDirectory()) {
-                    socket.write(`30 ${path.join(reqUrl.pathname, 'index.gmi')}`);
-                    socket.end();
+                    if (config.autoListDirectory) {
+                        let z = fs.readdirSync(localContentPath);
+                        socket.write(`20 \r\n`);
+                        socket.write(`# Directory ${reqUrl.pathname}\n`);
+                        z.forEach((v) => {
+                            socket.write(`=> ${reqUrl.pathname.substring(1)}/${v} ${v}\n`);
+                        });
+                        socket.end();
+                    } else {
+                        socket.write(`30 ${[reqUrl, 'index.gmi'].join('/')}\r\n`);
+                        socket.end();
+                    }
                 } else if (stat.isFile()) {
                     let mime = determineMIME(localContentPath);
                     if (!isServableMIME(mime)) {
@@ -78,6 +111,7 @@ const server = tls.createServer(options, (socket) => {
                         socket.write('51 Not found\r\n');
                         socket.end();
                     } else {
+                        // socket.write(Buffer.from("20 \r\n", {encoding: 'utf-8'}));
                         socket.write(`20 ${mime}; charset=${config.defaultCharset||'utf-8'}\r\n`);
                         try {
                             let data = fs.readFileSync(localContentPath);
@@ -120,7 +154,7 @@ if (config.proxy.enabled) {
     const gemtext = require('./gemtext');
     const proxy = http.createServer((req, res) => {
         log(`proxy: ${req.url}`);
-        let reqUrl = (!req.url || !req.url.substring(1))? '/index.gmi' : req.url;
+        let reqUrl = (!req.url || !req.url.substring(1)) && !config.autoListDirectory? '/index.gmi' : req.url;
         let localContentPath = path.join(config.content, reqUrl);
         try {
             let stat = fs.statSync(localContentPath);
@@ -130,16 +164,7 @@ if (config.proxy.enabled) {
                 try {
                     let data = fs.readFileSync(localContentPath);
                     if (mime === 'text/gemini') {
-                        let proxyCSS = '';
-                        try {
-                            if (config.proxy.css && typeof config.proxy.css === 'string' && config.proxy.css.trim()) {
-                                proxyCSS = fs.readFileSync(config.proxy.css);
-                            }
-                        } catch (e) {
-                            // intentionally left blank.
-                        }
                         let processedData = gemtext.parse(data.toString()).generate(gemtext.HTMLGenerator);
-                        let cssString = proxyCSS? `<style>${proxyCSS}</style>` : '';
                         data = `<html><head><meta charset="utf-8" />${cssString}</head><body>${processedData}</body></html>`;
                         mime = 'text/html';
                     }
@@ -149,6 +174,19 @@ if (config.proxy.enabled) {
                     error(e);
                     res.statusCode = 500;
                     res.write('Internal error');
+                }
+            } else if (stat.isDirectory()) {
+                if (config.autoListDirectory) {
+                    let z = fs.readdirSync(localContentPath);
+                    let data = `<html><head><meta charset="utf-8"/>${cssString}</head><body>
+<h1>Directory ${reqUrl}</h1><hr />
+<pre><a href="..">..</a>\n${z.map((v) => `<a href="${reqUrl.substring(1)}/${v}">${v}</a>`).join('\n')}</pre><hr/><i style="font-family:serif;font-size:80%">generated http frontend with iii-server.</i></body></html>`
+                    let mime = 'text/html';
+                    res.writeHead(200, {'Content-Type': mime});
+                    res.write(data);
+                } else {
+                    socket.write(`30 ${['/', reqUrl.pathname, 'index.gmi'].join('/')}\r\n`);
+                    socket.end();
                 }
             } else {
                 error(e);
