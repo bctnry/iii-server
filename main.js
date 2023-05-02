@@ -164,8 +164,12 @@ if (config.proxy.enabled) {
                 try {
                     let data = fs.readFileSync(localContentPath);
                     if (mime === 'text/gemini') {
-                        let processedData = gemtext.parse(data.toString()).generate(gemtext.HTMLGenerator);
-                        data = `<html><head><meta charset="utf-8" />${cssString}</head><body>${processedData}</body></html>`;
+                        let parsedData = gemtext.parse(data.toString());
+                        let processedData = parsedData.generate(gemtext.HTMLGenerator);
+                        let titleElementIndex = parsedData.data.findIndex((v) => v._ === 4 && v.level === 1);
+                        let title = titleElementIndex === -1? reqUrl : parsedData.data[titleElementIndex].text;
+                        console.log(titleElementIndex, title);
+                        data = `<html><head><meta charset="utf-8" /><title>${config.siteName} :: ${title}</title>${cssString}</head><body>${processedData}</body></html>`;
                         mime = 'text/html';
                     }
                     res.writeHead(200, {'Content-Type': mime});
@@ -178,7 +182,7 @@ if (config.proxy.enabled) {
             } else if (stat.isDirectory()) {
                 if (config.autoListDirectory) {
                     let z = fs.readdirSync(localContentPath);
-                    let data = `<html><head><meta charset="utf-8"/>${cssString}</head><body>
+                    let data = `<html><head><meta charset="utf-8"/><title>${config.siteName} :: ${reqUrl}</title>${cssString}</head><body>
 <h1>Directory ${reqUrl}</h1><hr />
 <pre><a href="..">..</a>\n${z.map((v) => `<a href="${reqUrl.substring(1)}/${v}">${v}</a>`).join('\n')}</pre><hr/><i style="font-family:serif;font-size:80%">generated http frontend with iii-server.</i></body></html>`
                     let mime = 'text/html';
