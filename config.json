@@ -1,16 +1,20 @@
 {
-    "content": "./content",
-    "serverCert": "./domain.crt",
-    "serverKey": "./domain.key",
-    "serverKeyPassword": "123456",
-    "host": "your.hostname.here",
-    "block": [
-        "/.git"
+    "serverList": [
+	{
+	    "content": "./content",
+	    "host": "127.0.0.1",
+	    "block": [
+		"/.git"
+	    ],
+	    "proxy": {
+		"enabled": true,
+		"port": 1966,
+		"css": "style.css"
+	    },
+	    "autoListDirectory": false
+	}
     ],
-    "proxy": {
-        "enabled": true,
-        "port": 1966,
-        "css": "style.css"
-    },
-    "autoListDirectory": false
+    "serverCert": "./cert.pem",
+    "serverKey": "./key.pem",
+    "serverKeyPassword": "abcdef"
 }
