@@ -74,25 +74,33 @@ const server = tls.createServer(options, (socket) => {
         let resData = res;
         try {
             let reqUrl = new url.URL(resData.trim(), `gemini://${config.host}`);
-            if (reqUrl.hostname !== config.host) {
+	    let gmiServer = null;
+	    for (let i = 0; i < config.serverList.length; i++) {
+		if (reqUrl.hostname === config.serverList[i].host) {
+		    gmiServer = config.serverList[i];
+		    break;
+		}
+	    }
+	    if (gmiServer === null) {
                 socket.write('53 No proxy request please\r\n');
                 socket.end();
                 return;
             }
-            
+
+	    if (!gmiServer.block) { server.block = []; }
             try {
-                for (let i = 0; i < config.block.length; i++) {
-                    if (reqUrl.pathname.startsWith(config.block[i])) {
+                for (let i = 0; i < gmiServer.block.length; i++) {
+                    if (reqUrl.pathname.startsWith(gmiServer.block[i])) {
                         // pretend that it isn't here...
                         socket.write('51 Not found\r\n');
                         socket.end();
                         return;
                     }
                 }
-                let localContentPath = path.join(config.content, reqUrl.pathname);
+                let localContentPath = path.join(gmiServer.content, reqUrl.pathname);
                 let stat = fs.statSync(localContentPath);
                 if (stat.isDirectory()) {
-                    if (config.autoListDirectory) {
+                    if (server.autoListDirectory) {
                         let z = fs.readdirSync(localContentPath);
                         socket.write(`20 \r\n`);
                         socket.write(`# Directory ${reqUrl.pathname}\n`);
@@ -148,65 +156,69 @@ server.listen(1965, () => {
     log('server bound');
 });
 
-
-if (config.proxy.enabled) {
-    const http = require('http');
-    const gemtext = require('./gemtext');
-    const proxy = http.createServer((req, res) => {
-        log(`proxy: ${req.url}`);
-        let reqUrl = (!req.url || !req.url.substring(1)) && !config.autoListDirectory? '/index.gmi' : req.url;
-        let localContentPath = path.join(config.content, reqUrl);
-        try {
-            let stat = fs.statSync(localContentPath);
-            if (stat.isFile()) {
-                res.statusCode = 200;
-                let mime = determineMIME(localContentPath)||'application/octet-stream';
-                try {
-                    let data = fs.readFileSync(localContentPath);
-                    if (mime === 'text/gemini') {
-                        let parsedData = gemtext.parse(data.toString());
-                        let processedData = parsedData.generate(gemtext.HTMLGenerator);
-                        let titleElementIndex = parsedData.data.findIndex((v) => v._ === 4 && v.level === 1);
-                        let title = titleElementIndex === -1? reqUrl : parsedData.data[titleElementIndex].text;
-                        console.log(titleElementIndex, title);
-                        data = `<html><head><meta charset="utf-8" /><title>${config.siteName} :: ${title}</title>${cssString}</head><body>${processedData}</body></html>`;
-                        mime = 'text/html';
+const http = require('http');
+const gemtext = require('./gemtext');
+let proxyList = [];
+for (let i = 0; i < config.serverList.length; i++) {
+    let gmiServer = config.serverList[i];
+    if (gmiServer.proxy && gmiServer.proxy.enabled) {
+	let x = http.createServer((req, res) => {
+	    log(`proxy(${gmiServer.host}): ${req.host} ${req.url}`)
+            let reqUrl = (!req.url || !req.url.substring(1)) && !config.autoListDirectory? '/index.gmi' : req.url;
+            let localContentPath = path.join(gmiServer.content, reqUrl);
+            try {
+		let stat = fs.statSync(localContentPath);
+		if (stat.isFile()) {
+                    res.statusCode = 200;
+                    let mime = determineMIME(localContentPath)||'application/octet-stream';
+                    try {
+			let data = fs.readFileSync(localContentPath);
+			if (mime === 'text/gemini') {
+                            let parsedData = gemtext.parse(data.toString());
+                            let processedData = parsedData.generate(gemtext.HTMLGenerator);
+                            let titleElementIndex = parsedData.data.findIndex((v) => v._ === 4 && v.level === 1);
+                            let title = titleElementIndex === -1? reqUrl : parsedData.data[titleElementIndex].text;
+                            data = `<html><head><meta charset="utf-8" /><title>${gmiServer.proxy.siteName||''} :: ${title}</title>${cssString}</head><body>${processedData}</body></html>`;
+                            mime = 'text/html';
+			}
+			res.writeHead(200, {'Content-Type': mime});
+			res.write(data);
+                    } catch (e) {
+			error(e);
+			res.statusCode = 500;
+			res.write('Internal error');
                     }
-                    res.writeHead(200, {'Content-Type': mime});
-                    res.write(data);
-                } catch (e) {
-                    error(e);
-                    res.statusCode = 500;
-                    res.write('Internal error');
-                }
-            } else if (stat.isDirectory()) {
-                if (config.autoListDirectory) {
-                    let z = fs.readdirSync(localContentPath);
-                    let data = `<html><head><meta charset="utf-8"/><title>${config.siteName} :: ${reqUrl}</title>${cssString}</head><body>
+		} else if (stat.isDirectory()) {
+                    if (config.autoListDirectory) {
+			let z = fs.readdirSync(localContentPath);
+			let data = `<html><head><meta charset="utf-8"/><title>${config.siteName} :: ${reqUrl}</title>${cssString}</head><body>
 <h1>Directory ${reqUrl}</h1><hr />
 <pre><a href="..">..</a>\n${z.map((v) => `<a href="${reqUrl.substring(1)}/${v}">${v}</a>`).join('\n')}</pre><hr/><i style="font-family:serif;font-size:80%">generated http frontend with iii-server.</i></body></html>`
-                    let mime = 'text/html';
-                    res.writeHead(200, {'Content-Type': mime});
-                    res.write(data);
-                } else {
-                    socket.write(`30 ${['/', reqUrl.pathname, 'index.gmi'].join('/')}\r\n`);
-                    socket.end();
-                }
-            } else {
-                error(e);
-                res.statusCode = 404;
-                res.write('Not found');
+			let mime = 'text/html';
+			res.writeHead(200, {'Content-Type': mime});
+			res.write(data);
+                    } else {
+			socket.write(`30 ${['/', reqUrl.pathname, 'index.gmi'].join('/')}\r\n`);
+			socket.end();
+                    }
+		} else {
+                    error(e);
+                    res.statusCode = 404;
+                    res.write('Not found');
+		}
+		res.end();
+            } catch (e) {
+		error(e);
+		res.statusCode = 404;
+		res.write('Not found');
+		res.end();
             }
-            res.end();
-        } catch (e) {
-            error(e);
-            res.statusCode = 404;
-            res.write('Not found');
-            res.end();
-        }
-    });
-    proxy.on('clientError', (err, socket) => {
-        socket.end('HTTP/1.1 400 Bad Request');
-    });
-    proxy.listen(config.proxy.port||1966);
+	});
+	x.on('clientError', (err, socket) => {
+            socket.end('HTTP/1.1 400 Bad Request');
+	});
+	x.listen(gmiServer.proxy.port);
+	proxyList.push(x);
+    }
 }
+
